@@ -1,0 +1,4 @@
+# Third-party install paths (set when Streamer was configured with BUILD_THIRDPARTY).
+# Used so find_package(Streamer) can locate GStreamer, OpenCV, and spdlog via find_dependency.
+set(Streamer_THIRDPARTY_CMAKE_PREFIX_PATH "@Streamer_THIRDPARTY_CMAKE_PREFIX_PATH@")
+set(Streamer_GSTREAMER_PKG_CONFIG_PATH "@Streamer_GSTREAMER_PKG_CONFIG_PATH@")

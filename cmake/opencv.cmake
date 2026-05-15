@@ -1,40 +1,25 @@
-include(ExternalProject)
-
+# Paths and options (always set; used for both building and using existing install)
 set(OPENCV_SRC_DIR ${CMAKE_SOURCE_DIR}/third_party/cv/opencv CACHE PATH "Path to OpenCV source directory")
-
-# Check if cached value exists and is valid
-if(OPENCV_SRC_DIR AND EXISTS "${OPENCV_SRC_DIR}/CMakeLists.txt")
-    set(OPENCV_SRC_DIR ${OPENCV_SRC_DIR} CACHE PATH "Path to OpenCV source directory" FORCE)
-else()
-    message(FATAL_ERROR "OpenCV source directory not found at ${OPENCV_SRC_DIR}")
-endif()
-
-# Build directory for OpenCV
-# Use source directory so it persists across build clean operations
 set(OPENCV_BUILD_DIR ${CMAKE_SOURCE_DIR}/.opencv-build CACHE PATH "OpenCV build directory")
 set(OPENCV_INSTALL_PREFIX ${CMAKE_SOURCE_DIR}/.opencv-install CACHE PATH "OpenCV install prefix")
-
-# Find CMake (required for building OpenCV)
-find_program(CMAKE_EXE cmake REQUIRED)
-
-# Independent build type flag for OpenCV (defaults to Release)
 set(OPENCV_BUILD_TYPE "Release" CACHE STRING "Build type for OpenCV (Debug or Release)")
 set_property(CACHE OPENCV_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
-
-# CPU baseline configuration (default to native optimization)
 set(CPU_BASELINE "NATIVE" CACHE STRING "OpenCV CPU baseline optimization")
 set_property(CACHE CPU_BASELINE PROPERTY STRINGS "NATIVE" "AVX2" "AVX" "SSE4_2" "SSE4_1" "SSE3" "SSE2")
 
-# Check for opencv_contrib modules
-set(OPENCV_CONTRIB_DIR ${CMAKE_SOURCE_DIR}/third_party/cv/opencv_contrib)
-set(OPENCV_EXTRA_MODULES_PATH "")
-if(EXISTS "${OPENCV_CONTRIB_DIR}/modules")
-    set(OPENCV_EXTRA_MODULES_PATH "${OPENCV_CONTRIB_DIR}/modules")
-    message(STATUS "OpenCV contrib modules found at: ${OPENCV_EXTRA_MODULES_PATH}")
-endif()
-
-# Build the list of CMake configure arguments
-set(OPENCV_CMAKE_ARGS
+if(BUILD_THIRDPARTY)
+    include(ExternalProject)
+    if(NOT OPENCV_SRC_DIR OR NOT EXISTS "${OPENCV_SRC_DIR}/CMakeLists.txt")
+        message(FATAL_ERROR "OpenCV source directory not found at ${OPENCV_SRC_DIR}")
+    endif()
+    find_program(CMAKE_EXE cmake REQUIRED)
+    set(OPENCV_CONTRIB_DIR ${CMAKE_SOURCE_DIR}/third_party/cv/opencv_contrib)
+    set(OPENCV_EXTRA_MODULES_PATH "")
+    if(EXISTS "${OPENCV_CONTRIB_DIR}/modules")
+        set(OPENCV_EXTRA_MODULES_PATH "${OPENCV_CONTRIB_DIR}/modules")
+        message(STATUS "OpenCV contrib modules found at: ${OPENCV_EXTRA_MODULES_PATH}")
+    endif()
+    set(OPENCV_CMAKE_ARGS
     -DCMAKE_BUILD_TYPE:STRING=${OPENCV_BUILD_TYPE}
     -DCMAKE_INSTALL_PREFIX:STRING=${OPENCV_INSTALL_PREFIX}
     -DCPU_BASELINE:STRING=${CPU_BASELINE}
@@ -64,11 +49,10 @@ set(OPENCV_CMAKE_ARGS
     -DBUILD_opencv_python:BOOL=OFF
     -DINSTALL_PYTHON_EXAMPLES:BOOL=OFF
     -DINSTALL_C_EXAMPLES:BOOL=OFF
-)
-
-# Add opencv_contrib modules path if available
-if(OPENCV_EXTRA_MODULES_PATH)
-    list(APPEND OPENCV_CMAKE_ARGS -DOPENCV_EXTRA_MODULES_PATH:STRING=${OPENCV_EXTRA_MODULES_PATH})
+    )
+    if(OPENCV_EXTRA_MODULES_PATH)
+        list(APPEND OPENCV_CMAKE_ARGS -DOPENCV_EXTRA_MODULES_PATH:STRING=${OPENCV_EXTRA_MODULES_PATH})
+    endif()
 endif()
 
 # Determine library extension and naming based on platform
@@ -106,38 +90,33 @@ if(NOT EXISTS "${OPENCV_INCLUDE_DIR}")
     set(OPENCV_INCLUDE_DIR "${OPENCV_INSTALL_PREFIX}/include")
 endif()
 
-# Create the include directory if it doesn't exist
-# This is necessary because CMake validates INTERFACE_INCLUDE_DIRECTORIES at configure time
-# even though the directory will be populated during the ExternalProject build
-if(NOT EXISTS "${OPENCV_INCLUDE_DIR}")
-    file(MAKE_DIRECTORY "${OPENCV_INCLUDE_DIR}")
+if(BUILD_THIRDPARTY)
+    if(NOT EXISTS "${OPENCV_INCLUDE_DIR}")
+        file(MAKE_DIRECTORY "${OPENCV_INCLUDE_DIR}")
+    endif()
+    set(OPENCV_CMAKE_CACHE "${OPENCV_BUILD_DIR}/CMakeCache.txt")
+    if(EXISTS "${OPENCV_CMAKE_CACHE}")
+        set(OPENCV_CONFIGURE_CMD ${CMAKE_COMMAND} -E echo "OpenCV already configured, skipping...")
+    else()
+        set(OPENCV_CONFIGURE_CMD ${CMAKE_EXE} -S ${OPENCV_SRC_DIR} -B ${OPENCV_BUILD_DIR} ${OPENCV_CMAKE_ARGS})
+    endif()
+    ExternalProject_Add(
+        opencv_build
+        SOURCE_DIR ${OPENCV_SRC_DIR}
+        BINARY_DIR ${OPENCV_BUILD_DIR}
+        INSTALL_DIR ${OPENCV_INSTALL_PREFIX}
+        CONFIGURE_COMMAND ${OPENCV_CONFIGURE_CMD}
+        BUILD_COMMAND ${CMAKE_EXE} --build ${OPENCV_BUILD_DIR} --config ${OPENCV_BUILD_TYPE}
+        INSTALL_COMMAND ${CMAKE_EXE} --install ${OPENCV_BUILD_DIR} --config ${OPENCV_BUILD_TYPE} --prefix ${OPENCV_INSTALL_PREFIX}
+        BUILD_ALWAYS OFF
+        BUILD_BYPRODUCTS
+            ${OPENCV_LIB_DIR}/libopencv_core${OPENCV_LIB_SUFFIX}${OPENCV_LIB_EXT}
+            ${OPENCV_LIB_DIR}/libopencv_imgproc${OPENCV_LIB_SUFFIX}${OPENCV_LIB_EXT}
+            ${OPENCV_LIB_DIR}/libopencv_imgcodecs${OPENCV_LIB_SUFFIX}${OPENCV_LIB_EXT}
+            ${OPENCV_LIB_DIR}/libopencv_videoio${OPENCV_LIB_SUFFIX}${OPENCV_LIB_EXT}
+            ${OPENCV_LIB_DIR}/libopencv_highgui${OPENCV_LIB_SUFFIX}${OPENCV_LIB_EXT}
+    )
 endif()
-
-# Check if OpenCV is already configured
-set(OPENCV_CMAKE_CACHE "${OPENCV_BUILD_DIR}/CMakeCache.txt")
-if(EXISTS "${OPENCV_CMAKE_CACHE}")
-    set(OPENCV_CONFIGURE_CMD ${CMAKE_COMMAND} -E echo "OpenCV already configured, skipping...")
-else()
-    set(OPENCV_CONFIGURE_CMD ${CMAKE_EXE} -S ${OPENCV_SRC_DIR} -B ${OPENCV_BUILD_DIR} ${OPENCV_CMAKE_ARGS})
-endif()
-
-# ExternalProject to build OpenCV
-ExternalProject_Add(
-    opencv_build
-    SOURCE_DIR ${OPENCV_SRC_DIR}
-    BINARY_DIR ${OPENCV_BUILD_DIR}
-    INSTALL_DIR ${OPENCV_INSTALL_PREFIX}
-    CONFIGURE_COMMAND ${OPENCV_CONFIGURE_CMD}
-    BUILD_COMMAND ${CMAKE_EXE} --build ${OPENCV_BUILD_DIR} --config ${OPENCV_BUILD_TYPE}
-    INSTALL_COMMAND ${CMAKE_EXE} --install ${OPENCV_BUILD_DIR} --config ${OPENCV_BUILD_TYPE} --prefix ${OPENCV_INSTALL_PREFIX}
-    BUILD_ALWAYS OFF
-    BUILD_BYPRODUCTS
-        ${OPENCV_LIB_DIR}/libopencv_core${OPENCV_LIB_SUFFIX}${OPENCV_LIB_EXT}
-        ${OPENCV_LIB_DIR}/libopencv_imgproc${OPENCV_LIB_SUFFIX}${OPENCV_LIB_EXT}
-        ${OPENCV_LIB_DIR}/libopencv_imgcodecs${OPENCV_LIB_SUFFIX}${OPENCV_LIB_EXT}
-        ${OPENCV_LIB_DIR}/libopencv_videoio${OPENCV_LIB_SUFFIX}${OPENCV_LIB_EXT}
-        ${OPENCV_LIB_DIR}/libopencv_highgui${OPENCV_LIB_SUFFIX}${OPENCV_LIB_EXT}
-)
 
 # Create imported targets for OpenCV libraries
 # These will point to the installed libraries after the build
@@ -148,7 +127,9 @@ set_target_properties(OpenCV::core PROPERTIES
     IMPORTED_LOCATION ${OPENCV_LIB_DIR}/libopencv_core${OPENCV_LIB_SUFFIX}${OPENCV_LIB_EXT}
 )
 target_include_directories(OpenCV::core INTERFACE ${OPENCV_INCLUDE_DIR})
-add_dependencies(OpenCV::core opencv_build)
+if(BUILD_THIRDPARTY)
+    add_dependencies(OpenCV::core opencv_build)
+endif()
 
 # OpenCV imgproc library
 add_library(OpenCV::imgproc SHARED IMPORTED)
@@ -157,7 +138,9 @@ set_target_properties(OpenCV::imgproc PROPERTIES
 )
 target_include_directories(OpenCV::imgproc INTERFACE ${OPENCV_INCLUDE_DIR})
 target_link_libraries(OpenCV::imgproc INTERFACE OpenCV::core)
-add_dependencies(OpenCV::imgproc opencv_build)
+if(BUILD_THIRDPARTY)
+    add_dependencies(OpenCV::imgproc opencv_build)
+endif()
 
 # OpenCV imgcodecs library
 add_library(OpenCV::imgcodecs SHARED IMPORTED)
@@ -166,7 +149,9 @@ set_target_properties(OpenCV::imgcodecs PROPERTIES
 )
 target_include_directories(OpenCV::imgcodecs INTERFACE ${OPENCV_INCLUDE_DIR})
 target_link_libraries(OpenCV::imgcodecs INTERFACE OpenCV::core)
-add_dependencies(OpenCV::imgcodecs opencv_build)
+if(BUILD_THIRDPARTY)
+    add_dependencies(OpenCV::imgcodecs opencv_build)
+endif()
 
 # OpenCV videoio library
 add_library(OpenCV::videoio SHARED IMPORTED)
@@ -175,7 +160,9 @@ set_target_properties(OpenCV::videoio PROPERTIES
 )
 target_include_directories(OpenCV::videoio INTERFACE ${OPENCV_INCLUDE_DIR})
 target_link_libraries(OpenCV::videoio INTERFACE OpenCV::core)
-add_dependencies(OpenCV::videoio opencv_build)
+if(BUILD_THIRDPARTY)
+    add_dependencies(OpenCV::videoio opencv_build)
+endif()
 
 # OpenCV highgui library
 add_library(OpenCV::highgui SHARED IMPORTED)
@@ -184,7 +171,9 @@ set_target_properties(OpenCV::highgui PROPERTIES
 )
 target_include_directories(OpenCV::highgui INTERFACE ${OPENCV_INCLUDE_DIR})
 target_link_libraries(OpenCV::highgui INTERFACE OpenCV::core)
-add_dependencies(OpenCV::highgui opencv_build)
+if(BUILD_THIRDPARTY)
+    add_dependencies(OpenCV::highgui opencv_build)
+endif()
 
 # Convenience target that includes all core OpenCV libraries
 add_library(OpenCV::opencv INTERFACE IMPORTED)
@@ -195,8 +184,9 @@ target_link_libraries(OpenCV::opencv INTERFACE
     OpenCV::videoio
     OpenCV::highgui
 )
-# Ensure OpenCV is built before any target using OpenCV::opencv compiles
-add_dependencies(OpenCV::opencv opencv_build)
+if(BUILD_THIRDPARTY)
+    add_dependencies(OpenCV::opencv opencv_build)
+endif()
 
 # Create lowercase alias to match CMakeLists.txt usage
 add_library(opencv::opencv ALIAS OpenCV::opencv)
@@ -206,11 +196,10 @@ set(OPENCV_FOUND TRUE CACHE BOOL "OpenCV found")
 set(OPENCV_INCLUDE_DIRS ${OPENCV_INCLUDE_DIR} CACHE PATH "OpenCV include directories")
 set(OPENCV_LIBRARY_DIRS "${OPENCV_LIB_DIR}" CACHE PATH "OpenCV library directories")
 
-message(STATUS "OpenCV will be built from: ${OPENCV_SRC_DIR}")
-message(STATUS "OpenCV build directory: ${OPENCV_BUILD_DIR}")
-message(STATUS "OpenCV install prefix: ${OPENCV_INSTALL_PREFIX}")
-message(STATUS "OpenCV build type: ${OPENCV_BUILD_TYPE}")
-message(STATUS "OpenCV CPU baseline: ${CPU_BASELINE}")
-if(OPENCV_EXTRA_MODULES_PATH)
-    message(STATUS "OpenCV contrib modules: enabled")
+if(BUILD_THIRDPARTY)
+    message(STATUS "OpenCV will be built from: ${OPENCV_SRC_DIR}")
+    message(STATUS "OpenCV build directory: ${OPENCV_BUILD_DIR}")
+else()
+    message(STATUS "OpenCV: using existing install (BUILD_THIRDPARTY=OFF)")
 endif()
+message(STATUS "OpenCV install prefix: ${OPENCV_INSTALL_PREFIX}")
